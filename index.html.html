@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AB CHAT</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f5f5f5;color:#111}
+.card{width:min(430px,92vw);margin:7vh auto;background:#fff;border:1px solid #ddd;border-radius:24px;padding:30px;box-shadow:0 10px 30px #00000012}
+h1{text-align:center;margin:0 0 32px;font-size:28px}.logo b{font-weight:800}.logo span{font-weight:400}
+h2{font-size:28px;margin:0 0 8px;text-align:center}.sub{text-align:center;color:#777;margin-bottom:24px}
+input,button{width:100%;padding:14px;border-radius:12px;font-size:15px}input{border:1px solid #d5d5d5;margin:6px 0}button{border:0;background:#111;color:white;font-weight:700;margin-top:10px;cursor:pointer}
+.link{background:none;color:#111;margin-top:8px}.status{text-align:center;color:#777;font-size:13px;min-height:20px;margin-top:16px}
+#app{display:none;width:min(900px,94vw);margin:30px auto}.top{display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #ddd;border-radius:18px;padding:16px 20px}
+.chat{margin-top:18px;background:#fff;border:1px solid #ddd;border-radius:18px;padding:20px}.messages{height:420px;overflow:auto;border:1px solid #eee;border-radius:14px;padding:14px}
+.msg{padding:9px 12px;margin:7px 0;background:#f1f1f1;border-radius:12px}.msg.me{margin-left:18%;background:#111;color:#fff}.msg .meta{font-size:11px;opacity:.65;margin-bottom:3px}.empty{text-align:center;color:#888;padding:30px}.online{font-size:12px;color:#16803a}.composer{display:flex;gap:8px;margin-top:12px}.composer input{margin:0}.composer button{width:120px;margin:0}
+.logout{width:auto;padding:10px 16px;margin:0}
+</style>
+</head>
+<body>
+<div id="auth" class="card">
+  <h1 class="logo"><b>AB</b> CHAT</h1>
+  <h2 id="authTitle">Create your account</h2>
+  <div class="sub" id="authSub">Create a real AB CHAT account.</div>
+  <div id="signupFields">
+    <input id="fullName" placeholder="Full name">
+    <input id="username" placeholder="Username">
+  </div>
+  <input id="email" type="email" placeholder="Email">
+  <input id="password" type="password" placeholder="Password">
+  <button id="mainBtn">Create account</button>
+  <button class="link" id="switchBtn">Already have an account? Sign in</button>
+  <div class="status" id="status"></div>
+</div>
+
+<div id="app">
+  <div class="top">
+    <div><strong>AB CHAT</strong><div id="who" style="color:#777;margin-top:4px"></div><div class="online" id="realtimeStatus">Connecting to live messages...</div></div>
+    <button class="logout" id="logoutBtn">Log out</button>
+  </div>
+  <div class="chat">
+    <h2 style="text-align:left;font-size:22px">Messages</h2>
+    <div id="messages" class="messages"></div>
+    <div class="composer">
+      <input id="messageInput" placeholder="Write a message...">
+      <button id="sendBtn">Send</button>
+    </div>
+    <div class="status" id="appStatus"></div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://nklqpmvwsoogfzhlalzi.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_zRLr_Vw7yjdZLQN3u6Qqcw_eYIu05q_";
+
+const connected = SUPABASE_PUBLISHABLE_KEY.startsWith("sb_publishable_");
+let abChatSupabase = null;
+if (connected) {
+  abChatSupabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+}
+
+window.addEventListener("error", (e) => {
+  const box = document.getElementById("status");
+  if (box) box.textContent = "AB CHAT error: " + (e.message || "Unknown error");
+  console.error(e.error || e.message);
+});
+
+const auth = document.getElementById("auth");
+const app = document.getElementById("app");
+const status = document.getElementById("status");
+const appStatus = document.getElementById("appStatus");
+const authTitle = document.getElementById("authTitle");
+const authSub = document.getElementById("authSub");
+const signupFields = document.getElementById("signupFields");
+const mainBtn = document.getElementById("mainBtn");
+const switchBtn = document.getElementById("switchBtn");
+let signingUp = true;
+let realtimeChannel = null;
+let currentUser = null;
+
+if (!connected) status.textContent = "Paste your Supabase publishable key into this file first.";
+
+switchBtn.onclick = () => {
+  signingUp = !signingUp;
+  signupFields.style.display = signingUp ? "" : "none";
+  authTitle.textContent = signingUp ? "Create your account" : "Welcome back";
+  authSub.textContent = signingUp ? "Create a real AB CHAT account." : "Sign in to your AB CHAT account.";
+  mainBtn.textContent = signingUp ? "Create account" : "Sign in";
+  switchBtn.textContent = signingUp ? "Already have an account? Sign in" : "Need an account? Create one";
+  status.textContent = "";
+};
+
+mainBtn.onclick = async () => {
+  if (!connected) return status.textContent = "Add your publishable key first.";
+  status.textContent = "Working...";
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  if (!email || !password) return status.textContent = "Enter your email and password.";
+
+  let result;
+  if (signingUp) {
+    const full_name = document.getElementById("fullName").value.trim();
+    const username = document.getElementById("username").value.trim();
+    if (!full_name || !username) return status.textContent = "Enter your name and username.";
+    localStorage.setItem("ab_chat_signup_email", email);
+    result = await abChatSupabase.auth.signUp({email,password,options:{data:{full_name,username},emailRedirectTo:window.location.origin + "/"}});
+  } else {
+    result = await abChatSupabase.auth.signInWithPassword({email,password});
+  }
+  if (result.error) return status.textContent = result.error.message;
+  if (signingUp && !result.data.session) {
+    status.textContent = "Account created. Check your email if confirmation is required, then sign in.";
+  } else {
+    status.textContent = "Success!";
+    await showApp(result.data.session);
+  }
+};
+
+async function showApp(session) {
+  if (!session) return;
+  currentUser = session.user;
+  auth.style.display = "none";
+  app.style.display = "block";
+  document.getElementById("who").textContent = session.user.email || "";
+  await loadMessages();
+  startRealtime();
+}
+
+async function loadMessages() {
+  const box = document.getElementById("messages");
+  const {data,error} = await abChatSupabase.from("messages").select("id,sender_id,content,created_at").order("created_at",{ascending:true}).limit(100);
+  if (error) { appStatus.textContent = "Messages error: " + error.message; return; }
+  renderMessages(data || []);
+}
+
+function renderMessages(data) {
+  const box = document.getElementById("messages");
+  if (!data.length) {
+    box.innerHTML = '<div class="empty">No messages yet. Send the first one!</div>';
+    return;
+  }
+  box.innerHTML = data.map(renderMessage).join("");
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderMessage(m) {
+  const mine = currentUser && m.sender_id === currentUser.id;
+  const time = m.created_at ? new Date(m.created_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "";
+  return `<div class="msg ${mine ? "me" : ""}" data-id="${escapeHtml(String(m.id || ""))}"><div class="meta">${mine ? "You" : "AB CHAT user"} · ${escapeHtml(time)}</div>${escapeHtml(m.content || "")}</div>`;
+}
+
+function addMessageToScreen(m) {
+  const box = document.getElementById("messages");
+  const empty = box.querySelector(".empty");
+  if (empty) empty.remove();
+  if (m.id && box.querySelector(`[data-id="${CSS.escape(String(m.id))}"]`)) return;
+  box.insertAdjacentHTML("beforeend", renderMessage(m));
+  box.scrollTop = box.scrollHeight;
+}
+
+function startRealtime() {
+  if (!abChatSupabase || realtimeChannel) return;
+  const statusEl = document.getElementById("realtimeStatus");
+  statusEl.textContent = "Connecting to live messages...";
+  realtimeChannel = abChatSupabase
+    .channel("ab-chat-messages")
+    .on("postgres_changes", {event:"INSERT", schema:"public", table:"messages"}, payload => {
+      addMessageToScreen(payload.new);
+    })
+    .subscribe(status => {
+      if (status === "SUBSCRIBED") {
+        statusEl.textContent = "● Live messages on";
+      } else if (status === "CHANNEL_ERROR") {
+        statusEl.textContent = "Live messages unavailable — check Realtime for messages table.";
+      } else if (status === "TIMED_OUT") {
+        statusEl.textContent = "Live connection timed out. Refresh to retry.";
+      }
+    });
+}
+
+function stopRealtime() {
+  if (realtimeChannel) {
+    abChatSupabase.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+  }
+}
+
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));}
+
+document.getElementById("sendBtn").onclick = async () => {
+  const input = document.getElementById("messageInput");
+  const text = input.value.trim();
+  if (!text) return;
+  const {data:{user}} = await abChatSupabase.auth.getUser();
+  if (!user) return;
+  const {error} = await abChatSupabase.from("messages").insert({sender_id:user.id,content:text});
+  if (error) appStatus.textContent = "Send error: " + error.message;
+  else { input.value=""; appStatus.textContent=""; }
+};
+
+document.getElementById("messageInput").addEventListener("keydown",e=>{
+  if(e.key==="Enter") document.getElementById("sendBtn").click();
+});
+
+document.getElementById("logoutBtn").onclick = async () => {
+  stopRealtime();
+  await abChatSupabase.auth.signOut();
+  app.style.display="none"; auth.style.display="block";
+};
+
+if (abChatSupabase) {
+  const authParams = new URLSearchParams(window.location.hash.substring(1));
+  if (authParams.get("error_code") === "otp_expired") {
+    const savedEmail = localStorage.getItem("ab_chat_signup_email");
+    const lastAutoResend = Number(localStorage.getItem("ab_chat_last_auto_resend") || 0);
+    const canAutoResend = Date.now() - lastAutoResend > 65000;
+
+    status.textContent = "Your confirmation link expired. Sending you a new confirmation email...";
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+
+    if (savedEmail && canAutoResend) {
+      localStorage.setItem("ab_chat_last_auto_resend", String(Date.now()));
+      abChatSupabase.auth.resend({
+        type: "signup",
+        email: savedEmail,
+        options: { emailRedirectTo: window.location.origin + "/" }
+      }).then(({ error }) => {
+        if (error) {
+          status.textContent = "The old link expired, but AB CHAT could not resend the email yet: " + error.message;
+        } else {
+          status.textContent = "Your old confirmation link expired. A new confirmation email has been sent to " + savedEmail + ".";
+        }
+      });
+    } else if (savedEmail) {
+      status.textContent = "A new confirmation email was recently requested. Please check your inbox for the newest AB CHAT email.";
+    } else {
+      status.textContent = "Your confirmation link expired. Please create the account again so AB CHAT can send a new confirmation email.";
+    }
+  }
+
+  abChatSupabase.auth.getSession().then(({data}) => showApp(data.session));
+  abChatSupabase.auth.onAuthStateChange((_event, session) => {
+    if (session) showApp(session);
+  });
+}
+</script>
+</body>
+</html>
